@@ -21,7 +21,7 @@ struct kvdb *kvdb_open(const char *pathname);
 
 void kvdb_close(struct kvdb *kvdb);
 
-int /* -1|0|+1 0 success */
+int /* -1|0|+1 */
 kvdb_remove(struct kvdb *kvdb,
 	    const void *key,
 	    uint64_t key_len,
@@ -30,12 +30,12 @@ kvdb_remove(struct kvdb *kvdb,
 
 int /* -1|0|+1 */
 kvdb_insert(struct kvdb *kvdb,
-	    const void *key, // insert this key
+	    const void *key,
 	    uint64_t key_len,
 	    const void *val,
 	    uint64_t val_len);
 
-int /* -1|0| */
+int /* -1|0|+1 */
 kvdb_update(struct kvdb *kvdb,
 	    const void *key,
 	    uint64_t key_len,
@@ -55,9 +55,9 @@ kvdb_lookup(struct kvdb *kvdb,
 	    uint64_t key_len,
 	    void *val,
 	    uint64_t *val_len); /* in/out */
-// how many objects
+
 uint64_t kvdb_size(const struct kvdb *kvdb);
-// how many that unreachable
+
 uint64_t kvdb_waste(const struct kvdb *kvdb);
 
 #endif /* _KVDB_H_ */

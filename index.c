@@ -168,6 +168,7 @@ index_lookup(struct index *index, const char *key_, uint64_t key_len)
 	assert( key_ && key_len );
 
 	key = hash(key_, key_len);
+	/*printf("index lookup begin - key_:[%s], key_len:%ld, key:%ld \n", key_, key_len,key);*/
 	key = key ? key : (key + 1);
 	for (i=0; i<index->capacity; ++i) {
 		j = (key + i) % index->capacity;
@@ -175,8 +176,10 @@ index_lookup(struct index *index, const char *key_, uint64_t key_len)
 			break;
 		}
 		if (index->maps[j].key == key) {
+			/*printf("index lookup - j:%ld, maps[j].key:%ld, maps[j].off:%ld \n", j, index->maps[j].key, index->maps[j].off);*/
 			return &index->maps[j].off;
 		}
 	}
+	/*printf("index lookup - key:%ld, index->capacity:%ld \n", key, index->capacity);*/
 	return NULL;
 }

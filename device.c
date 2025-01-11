@@ -84,7 +84,6 @@ device_open(const char *pathname)
 		return NULL;
 	}
 	memset(device, 0, sizeof (struct device));
-	// use DMA？，open the file in direct mode，直接把内容从buffer中直接复制到disk上
 	if (0 >= (device->fd = open(pathname, O_RDWR | O_DIRECT))) {
 		if (EACCES == errno) {
 			device_close(device);

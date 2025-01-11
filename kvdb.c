@@ -11,47 +11,50 @@
 #include "index.h"
 #include "kvdb.h"
 
-#define MUTATE_REMOVE  1
-#define MUTATE_INSERT  2
-#define MUTATE_UPDATE  3
+#define MUTATE_REMOVE 1
+#define MUTATE_INSERT 2
+#define MUTATE_UPDATE 3
 #define MUTATE_REPLACE 4
 
-struct kvdb {
+#define META_LEN 16
+
+struct kvdb
+{
 	uint64_t size;
 	uint64_t waste;
 	struct kvraw *kvraw;
 	struct index *index;
 };
-// 在链式存储结构中寻找key，以off追踪链表中下一个节点的偏移量
-// 并且优先使用256大小的buffer，
-// 若key过大，再动态分配内存
+
 static int
 chain_lookup(struct kvdb *kvdb,
-	     const void *key,
-	     uint64_t key_len,
-	     void *val,
-	     uint64_t *val_len, /* in/out */
-	     uint64_t *off)     /* in/out */
+			 const void *key,
+			 uint64_t key_len,
+			 void *val,
+			 uint64_t *val_len, /* in/out */
+			 uint64_t *off)		/* in/out */
 {
 	uint64_t key_len_, val_len_, off_;
 	void *key_, *val_;
 	char buf[256];
 
 	off_ = (*off);
-	while (off_) {
+	while (off_)
+	{
 
 		/* speculate with a small key read into a stack buffer */
 
 		key_ = buf;
 		val_ = val;
-		key_len_ = MIN(key_len, sizeof (buf));
+		key_len_ = MIN(key_len, sizeof(buf));
 		val_len_ = val_len ? (*val_len) : 0;
 		if (kvraw_lookup(kvdb->kvraw,
-				 key_,
-				 &key_len_,
-				 val_,
-				 &val_len_,
-				 &off_)) {
+						 key_,
+						 &key_len_,
+						 val_,
+						 &val_len_,
+						 &off_))
+		{
 			TRACE(0);
 			return -1;
 		}
@@ -59,26 +62,30 @@ chain_lookup(struct kvdb *kvdb,
 		/* key length mismatch or partial mismatch ==> no match */
 
 		if ((key_len_ != key_len) ||
-		    memcmp(key_, key, MIN(key_len, sizeof (key_)))) {
+			memcmp(key_, key, MIN(key_len, sizeof(key_))))
+		{
 			(*off) = off_;
 			continue;
 		}
 
 		/* key larger than stack buffer ? */
 
-		if (key_len_ > sizeof (key_)) {
-			if (!(key_ = malloc(key_len_))) {
+		if (key_len_ > sizeof(key_))
+		{
+			if (!(key_ = malloc(key_len_)))
+			{
 				TRACE(0);
 				return -1;
 			}
 			off_ = (*off);
 			val_len_ = 0; /* not needed */
 			if (kvraw_lookup(kvdb->kvraw,
-					 key_,
-					 &key_len_,
-					 val_,
-					 &val_len_,
-					 &off_)) {
+							 key_,
+							 &key_len_,
+							 val_,
+							 &val_len_,
+							 &off_))
+			{
 				FREE(key_);
 				TRACE(0);
 				return -1;
@@ -87,16 +94,20 @@ chain_lookup(struct kvdb *kvdb,
 
 		/* key match ? */
 
-		if (!memcmp(key_, key, key_len)) {
-			if (buf != key_) {
+		if (!memcmp(key_, key, key_len))
+		{
+			if (buf != key_)
+			{
 				FREE(key_);
 			}
-			if (val_len) {
+			if (val_len)
+			{
 				(*val_len) = val_len_;
 			}
 			break;
 		}
-		if (buf != key_) {
+		if (buf != key_)
+		{
 			FREE(key_);
 		}
 		(*off) = off_;
@@ -106,11 +117,11 @@ chain_lookup(struct kvdb *kvdb,
 
 static int /* -1|0|+1 */
 mutate(struct kvdb *kvdb,
-       const void *key,
-       uint64_t key_len,
-       void *val,
-       uint64_t *val_len,
-       int mode)
+	   const void *key,
+	   uint64_t key_len,
+	   void *val,
+	   uint64_t *val_len,
+	   int mode)
 {
 	uint64_t *ref, off;
 	uint64_t val_len_;
@@ -118,7 +129,8 @@ mutate(struct kvdb *kvdb,
 
 	/* index */
 
-	if (!(ref = index_update(kvdb->index, key, key_len))) {
+	if (!(ref = index_update(kvdb->index, key, key_len)))
+	{
 		TRACE(0);
 		return -1;
 	}
@@ -128,74 +140,89 @@ mutate(struct kvdb *kvdb,
 
 	val_ = ((MUTATE_REMOVE == mode) && val_len) ? val : NULL;
 	val_len_ = ((MUTATE_REMOVE == mode) && val_len) ? (*val_len) : 0;
-	if (chain_lookup(kvdb, key, key_len, val_, &val_len_, &off)) {
+	if (chain_lookup(kvdb, key, key_len, val_, &val_len_, &off))
+	{
 		TRACE(0);
 		return -1;
 	}
 
 	/* mutate */
 
-	if (MUTATE_REMOVE == mode) {
-		if (!off || !val_len_) {
+	if (MUTATE_REMOVE == mode)
+	{
+		if (!off || !val_len_)
+		{
 			return +1; /* invalid key */
 		}
 		if (kvraw_append(kvdb->kvraw,
-				 key,
-				 key_len,
-				 0,
-				 0,
-				 ref)) {
+						 key,
+						 key_len,
+						 0,
+						 0,
+						 ref))
+		{
 			TRACE(0);
 			return -1;
 		}
-		if (val_len) {
+		if (val_len)
+		{
 			(*val_len) = val_len_;
 		}
 		--kvdb->size;
 		++kvdb->waste;
 	}
-	else if (MUTATE_INSERT == mode) {
-		if (off && val_len_) {
+	else if (MUTATE_INSERT == mode)
+	{
+		if (off && val_len_)
+		{
 			return +1; /* key exists */
 		}
 		if (kvraw_append(kvdb->kvraw,
-				 key,
-				 key_len,
-				 val,
-				 (*val_len),
-				 ref)) {
+						 key,
+						 key_len,
+						 val,
+						 (*val_len),
+						 ref))
+		{
 			TRACE(0);
 			return -1;
 		}
 		++kvdb->size;
 	}
-	else if (MUTATE_UPDATE == mode) {
-		if (!off || !val_len_) {
+	else if (MUTATE_UPDATE == mode)
+	{
+		if (!off || !val_len_)
+		{
 			++kvdb->size;
 		}
-		else {
+		else
+		{
 			++kvdb->waste;
 		}
 		if (kvraw_append(kvdb->kvraw,
-				 key,
-				 key_len,
-				 val,
-				 (*val_len),
-				 ref)) {
+						 key,
+						 key_len,
+						 val,
+						 (*val_len),
+						 ref))
+		{
 			TRACE(0);
 			return -1;
 		}
 	}
-	else if (MUTATE_REPLACE == mode) {
-		if (!off || !val_len_) {
+	else if (MUTATE_REPLACE == mode)
+	{
+		if (!off || !val_len_)
+		{
 			return +1; /* invalid key */
 		}
 		if (kvraw_append(kvdb->kvraw,
-				 key,
-				 key_len,
-				 val,
-				 (*val_len),
-				 ref)) {
+						 key,
+						 key_len,
+						 val,
+						 (*val_len),
+						 ref))
+		{
 			TRACE(0);
 			return -1;
 		}
@@ -209,132 +236,188 @@ kvdb_open(const char *pathname)
 {
 	struct kvdb *kvdb;
 
-	assert( safe_strlen(pathname) );
+	assert(safe_strlen(pathname));
 
-	if (!(kvdb = malloc(sizeof (struct kvdb)))) {
+	if (!(kvdb = malloc(sizeof(struct kvdb))))
+	{
 		TRACE("out of memory");
 		return NULL;
 	}
-	memset(kvdb, 0, sizeof (struct kvdb));
+	memset(kvdb, 0, sizeof(struct kvdb));
 	if (!(kvdb->kvraw = kvraw_open(pathname)) ||
-	    !(kvdb->index = index_open())) {
+		!(kvdb->index = index_open()))
+	{
 		kvdb_close(kvdb);
 		TRACE(0);
 		return NULL;
 	}
+
+	/* if the raw store size is greater than 18 and STORE_RESTORE_FILE is enabled, perform store restoration. */
+	if (kvraw_size(kvdb->kvraw) > META_LEN+2 && STORE_RESTORE_FILE)
+	{
+		uint64_t off = 18; /* initial offset */
+
+		/* loop through the raw store, processing each key-value pair */
+		while (off < kvraw_size(kvdb->kvraw))
+		{
+			uint64_t key_len, val_len;
+			void *key, *val;
+			uint64_t *ref;
+
+			key = malloc(KVDB_MAX_KEY_LEN);
+			val = malloc(KVDB_MAX_VAL_LEN);
+			key_len = KVDB_MAX_KEY_LEN;
+			val_len = KVDB_MAX_VAL_LEN;
+
+			/* look up the key-value pair in the raw store */
+			if (kvraw_lookup(kvdb->kvraw,
+							 key,
+							 &key_len,
+							 val,
+							 &val_len,
+							 &off))
+			{
+				TRACE(0);
+				return NULL;
+			}
+
+			/* key length is zero, stop the loop */
+			if (!key_len)
+			{
+				break;
+			}
+
+			/* update the index with the current key */
+			if (!(ref = index_update(kvdb->index, key, key_len)))
+			{
+				TRACE(0);
+				return NULL;
+			}
+			(*ref) = off + META_LEN + 1 + 1;
+
+			FREE(key);
+			FREE(val);
+
+			/* move to the next key-value pair */
+			off += 18 + META_LEN + key_len + val_len;
+			++kvdb->size;
+		}
+	}
 	return kvdb;
 }
 
-void
-kvdb_close(struct kvdb *kvdb)
+void kvdb_close(struct kvdb *kvdb)
 {
-	if (kvdb) {
+	if (kvdb)
+	{
 		kvraw_close(kvdb->kvraw);
 		index_close(kvdb->index);
-		memset(kvdb, 0, sizeof (struct kvdb));
+		memset(kvdb, 0, sizeof(struct kvdb));
 	}
 	FREE(kvdb);
 }
 
 int /* -1|0|+1 */
 kvdb_remove(struct kvdb *kvdb,
-	    const void *key,
-	    uint64_t key_len,
-	    void *val,
-	    uint64_t *val_len)
+			const void *key,
+			uint64_t key_len,
+			void *val,
+			uint64_t *val_len)
 {
-	assert( kvdb );
-	assert( key );
-	assert( key_len && (KVDB_MAX_KEY_LEN >= key_len) );
-	assert( !val_len || !!(*val_len) || val );
+	assert(kvdb);
+	assert(key);
+	assert(key_len && (KVDB_MAX_KEY_LEN >= key_len));
+	assert(!val_len || !!(*val_len) || val);
 
 	return mutate(kvdb, key, key_len, val, val_len, MUTATE_REMOVE);
 }
 
 int /* -1|0|+1 */
 kvdb_insert(struct kvdb *kvdb,
-	    const void *key,
-	    uint64_t key_len,
-	    const void *val,
-	    uint64_t val_len)
+			const void *key,
+			uint64_t key_len,
+			const void *val,
+			uint64_t val_len)
 {
-	assert( kvdb );
-	assert( key );
-	assert( key_len && (KVDB_MAX_KEY_LEN >= key_len) );
-	assert( val );
-	assert( val_len && (KVDB_MAX_VAL_LEN >= val_len) );
+	assert(kvdb);
+	assert(key);
+	assert(key_len && (KVDB_MAX_KEY_LEN >= key_len));
+	assert(val);
+	assert(val_len && (KVDB_MAX_VAL_LEN >= val_len));
 
 	return mutate(kvdb,
-		      key,
-		      key_len,
-		      (void *)val,
-		      &val_len,
-		      MUTATE_INSERT);
+				  key,
+				  key_len,
+				  (void *)val,
+				  &val_len,
+				  MUTATE_INSERT);
 }
 
 int /* -1|0|+1 */
 kvdb_update(struct kvdb *kvdb,
-	    const void *key,
-	    uint64_t key_len,
-	    const void *val,
-	    uint64_t val_len)
+			const void *key,
+			uint64_t key_len,
+			const void *val,
+			uint64_t val_len)
 {
-	assert( kvdb );
-	assert( key );
-	assert( key_len && (KVDB_MAX_KEY_LEN >= key_len) );
-	assert( val );
-	assert( val_len && (KVDB_MAX_VAL_LEN >= val_len) );
+	assert(kvdb);
+	assert(key);
+	assert(key_len && (KVDB_MAX_KEY_LEN >= key_len));
+	assert(val);
+	assert(val_len && (KVDB_MAX_VAL_LEN >= val_len));
 
 	return mutate(kvdb,
-		      key,
-		      key_len,
-		      (void *)val,
-		      &val_len,
-		      MUTATE_UPDATE);
+				  key,
+				  key_len,
+				  (void *)val,
+				  &val_len,
+				  MUTATE_UPDATE);
 }
 
 int /* -1|0|+1 */
 kvdb_replace(struct kvdb *kvdb,
-	     const void *key,
-	     uint64_t key_len,
-	     const void *val,
-	     uint64_t val_len)
+			 const void *key,
+			 uint64_t key_len,
+			 const void *val,
+			 uint64_t val_len)
 {
-	assert( kvdb );
-	assert( key );
-	assert( key_len && (KVDB_MAX_KEY_LEN >= key_len) );
-	assert( val );
-	assert( val_len && (KVDB_MAX_VAL_LEN >= val_len) );
+	assert(kvdb);
+	assert(key);
+	assert(key_len && (KVDB_MAX_KEY_LEN >= key_len));
+	assert(val);
+	assert(val_len && (KVDB_MAX_VAL_LEN >= val_len));
 
 	return mutate(kvdb,
-		      key,
-		      key_len,
-		      (void *)val,
-		      &val_len,
-		      MUTATE_REPLACE);
+				  key,
+				  key_len,
+				  (void *)val,
+				  &val_len,
+				  MUTATE_REPLACE);
 }
 
 int /* -1|0|+1 */
 kvdb_lookup(struct kvdb *kvdb,
-	    const void *key,
-	    uint64_t key_len,
-	    void *val,
-	    uint64_t *val_len)
+			const void *key,
+			uint64_t key_len,
+			void *val,
+			uint64_t *val_len)
 {
 	const uint64_t *ref;
 	uint64_t val_len_;
 	uint64_t off;
 	void *val_;
 
-	assert( kvdb );
-	assert( key );
-	assert( key_len && (KVDB_MAX_KEY_LEN >= key_len) );
-	assert( !val_len || !(*val_len) || val );
+	assert(kvdb);
+	assert(key);
+	assert(key_len && (KVDB_MAX_KEY_LEN >= key_len));
+	assert(!val_len || !(*val_len) || val);
 
 	/* index */
 
 	ref = index_lookup(kvdb->index, key, key_len);
-	if (!ref || !(*ref)) {
+	if (!ref || !(*ref))
+	{
+		/*printf("index_lookup: invalid key, key:[%s], key_len:%ld\n", (char *)key, key_len);*/
 		return +1; /* invalid key */
 	}
 	off = (*ref);
@@ -343,14 +426,17 @@ kvdb_lookup(struct kvdb *kvdb,
 
 	val_ = val_len ? val : NULL;
 	val_len_ = val_len ? (*val_len) : 0;
-	if (chain_lookup(kvdb, key, key_len, val_, &val_len_, &off)) {
+	if (chain_lookup(kvdb, key, key_len, val_, &val_len_, &off))
+	{
 		TRACE(0);
 		return -1;
 	}
-	if (!off || !val_len_) {
+	if (!off || !val_len_)
+	{
 		return +1; /* invalid key */
 	}
-	if (val_len) {
+	if (val_len)
+	{
 		(*val_len) = val_len_;
 	}
 	return 0;
@@ -359,7 +445,7 @@ kvdb_lookup(struct kvdb *kvdb,
 uint64_t
 kvdb_size(const struct kvdb *kvdb)
 {
-	assert( kvdb );
+	assert(kvdb);
 
 	return kvdb->size;
 }
@@ -367,7 +453,7 @@ kvdb_size(const struct kvdb *kvdb)
 uint64_t
 kvdb_waste(const struct kvdb *kvdb)
 {
-	assert( kvdb );
+	assert(kvdb);
 
 	return kvdb->waste;
 }

@@ -21,6 +21,8 @@
 #include <string.h>
 #include <assert.h>
 
+#define STORE_RESTORE_FILE 0
+
 #define MIN(x,y) ( ((x) < (y)) ? (x) : (y) )
 #define MAX(x,y) ( ((x) > (y)) ? (x) : (y) )
 
